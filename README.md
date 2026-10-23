@@ -1,6 +1,6 @@
 # AURA — Accessible Companion
 
-AURA is a voice-first visual companion for people with low vision. The assistant and guardian preview run locally on the laptop. This no-AWS setup does not share health or location data with contacts on other devices.
+AURA is a voice-first visual prototype companion for people with low vision or visually impaired. The assistant and guardian preview run locally on the laptop. This no-AWS setup does not share health or location data with contacts on other devices.
 
 ## Hackathon track fit
 

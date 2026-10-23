@@ -1,6 +1,6 @@
 # AURA — a voice-first visual companion
 
-AURA is a voice-first visual companion for people who are blind or have low vision. Ask what is around you or say “Sam, find my keys,” move the camera as AURA guides the search, and ask “Sam, look again.” The prototype is designed around hands-free interaction and local processing on a laptop.
+AURA is a voice-first visual prototype companion for people who are visually impaired or have low vision. Ask what is around you or say “Sam, find my keys,” move the camera as AURA guides the search, and ask “Sam, look again.” The prototype is designed around hands-free interaction and local processing on a laptop.
 
 ## What the demo shows
 
@@ -12,7 +12,7 @@ AURA is a voice-first visual companion for people who are blind or have low visi
 
 ## Amazon hackathon direction
 
-AURA is presented as a web-based **Alexa+ simulated experience**: a voice-first assistant workflow built for the browser. It is a prototype and does not connect to an Echo device or the Alexa service. Check the [official hackathon rules](https://amazonappdev2026.devpost.com/rules) and make sure the submitted demo matches the current requirements.
+AURA is presented as a web-based **Alexa+ simulated experience**: a voice-first assistant workflow built for the browser. It is a prototype and does not connect to an Echo device or the Alexa service. 
 
 See [`SUBMISSION.md`](SUBMISSION.md) for copy-ready submission details, [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a timed video outline, and [`HACKATHON_PLAN.md`](HACKATHON_PLAN.md) for the project’s judging story.
 

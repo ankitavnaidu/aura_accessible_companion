@@ -9,8 +9,7 @@ AURA is a voice-first visual companion for people with low vision. The assistant
 - **Not claimed:** Bee track (AURA has no Bee device or Bee software), Fire TV track, Ring track, or Open Source mini challenge.
 - The AWS guardian feature is a deployable starter stack, not a deployed service or a claim of AWS challenge eligibility. It is not Bee data and does not qualify for the Bee track.
 
-Read [`SUBMISSION.md`](SUBMISSION.md) for the copy-ready project description and checklist, and [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a time-coded recording plan. See [`HACKATHON_PLAN.md`](HACKATHON_PLAN.md) for the current Amazon/PES track fit and submission strategy. Check the live [official rules](https://amazonappdev2026.devpost.com/rules) before submitting.
-For a PES-ready problem statement, short pitch, and honest evaluation worksheet, see [PES_PITCH.md](PES_PITCH.md).
+Read [`SUBMISSION.md`](SUBMISSION.md) for the copy-ready project description and checklist, and [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a time-coded recording plan. See [`HACKATHON_PLAN.md`](HACKATHON_PLAN.md) for the Amazon track fit and submission strategy. Check the live [official rules](https://amazonappdev2026.devpost.com/rules) before submitting.
 
 ## Start AURA
 

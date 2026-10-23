@@ -1,0 +1,345 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AURA consent-based guardian circle API. Deploy only after reviewing the privacy and setup notes.
+
+Parameters:
+  WebOrigin:
+    Type: String
+    Default: http://localhost:8006
+    Description: Local development origin only; the CloudFront origin is added separately.
+  CognitoDomainPrefix:
+    Type: String
+    Description: Globally unique Cognito hosted-login prefix, 1-63 lowercase letters/numbers/hyphens.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Handler: app.handler
+    CodeUri: backend/
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref AuraTable
+        CORS_ORIGINS: !Sub '${WebOrigin},https://${AuraDistribution.DomainName}'
+        COGNITO_DOMAIN: !Sub 'https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com'
+
+Resources:
+  AuraUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: aura-guardian-users
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  AuraResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref AuraUserPool
+      Identifier: aura
+      Name: AURA Guardian API
+      Scopes:
+        - ScopeName: circle.share
+          ScopeDescription: Read and write consented guardian-circle data.
+
+  AuraUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: AuraResourceServer
+    Properties:
+      ClientName: aura-guardian-web
+      UserPoolId: !Ref AuraUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile, aura/circle.share]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Sub '${WebOrigin}/'
+        - !Sub 'https://${AuraDistribution.DomainName}/'
+        - !Sub 'https://${AuraDistribution.DomainName}/guardian.html'
+      LogoutURLs:
+        - !Sub '${WebOrigin}/'
+        - !Sub 'https://${AuraDistribution.DomainName}/'
+        - !Sub 'https://${AuraDistribution.DomainName}/guardian.html'
+
+  AuraUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref AuraUserPool
+
+  AuraTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: UserIndex
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  AuraWebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AuraWebOriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-web-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  AuraWebCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub '${AWS::StackName}-no-cache'
+        Comment: Avoid stale consent and guardian status UI.
+        DefaultTTL: 0
+        MaxTTL: 0
+        MinTTL: 0
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig: {CookieBehavior: none}
+          HeadersConfig: {HeaderBehavior: none}
+          QueryStringsConfig: {QueryStringBehavior: none}
+
+  AuraDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: guardian.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: aura-private-web
+            DomainName: !GetAtt AuraWebBucket.RegionalDomainName
+            S3OriginConfig: {OriginAccessIdentity: ''}
+            OriginAccessControlId: !GetAtt AuraWebOriginAccess.Id
+        DefaultCacheBehavior:
+          TargetOriginId: aura-private-web
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          CachePolicyId: !Ref AuraWebCachePolicy
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Restrictions:
+          GeoRestriction: {RestrictionType: none}
+
+  AuraWebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuraWebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub '${AuraWebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${AuraDistribution}'
+
+  AuraApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: '$default'
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref WebOrigin
+          - !Sub 'https://${AuraDistribution.DomainName}'
+        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, POST, DELETE, OPTIONS]
+        MaxAge: 600
+      Auth:
+        Authorizers:
+          AuraJwt:
+            IdentitySource: '$request.header.Authorization'
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${AuraUserPool}'
+              audience: [!Ref AuraUserPoolClient]
+        DefaultAuthorizer: AuraJwt
+
+  AuraApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-guardian-api'
+      RetentionInDays: 7
+
+  AuraFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-guardian-api'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuraTable
+      Events:
+        CreateCircle:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        ListCircles:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles
+            Method: GET
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        CreateInvite:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/invites
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        AcceptInvite:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/invites/accept
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        ListMembers:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/members
+            Method: GET
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        ApproveMember:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/members/{memberId}/approve
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        RemoveMember:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/members/{memberId}
+            Method: DELETE
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        SetSharing:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/sharing
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        StopSharing:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/sharing
+            Method: DELETE
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        PutReading:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/readings
+            Method: POST
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+        GetLatest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref AuraApi
+            Path: /v1/circles/{circleId}/latest
+            Method: GET
+            Auth:
+              Authorizer: AuraJwt
+              AuthorizationScopes: [aura/circle.share]
+
+Outputs:
+  ApiUrl:
+    Description: HTTPS API base URL. Copy the complete URL into remote-config.js.
+    Value: !Sub 'https://${AuraApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+  UserPoolId:
+    Value: !Ref AuraUserPool
+  UserPoolClientId:
+    Value: !Ref AuraUserPoolClient
+  CognitoHostedUiDomain:
+    Value: !Sub 'https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com'
+  DynamoTableName:
+    Value: !Ref AuraTable
+  GuardianWebsiteUrl:
+    Value: !Sub 'https://${AuraDistribution.DomainName}/guardian.html'
+  WebBucketName:
+    Description: Private S3 bucket name for the static guardian portal files.
+    Value: !Ref AuraWebBucket
+  CloudFrontDistributionId:
+    Value: !Ref AuraDistribution
